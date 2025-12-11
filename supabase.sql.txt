@@ -23,8 +23,35 @@ comment on column public.cash_flows.direction is 'incoming = friend sent you mon
 -- Helpful index for sorting/filtering
 create index if not exists cash_flows_event_date_idx on public.cash_flows (event_date desc);
 
+-- 2b) Lookup tables for packs and games
+create table if not exists public.pack_options (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.game_options (
+  id uuid primary key default gen_random_uuid(),
+  name text not null unique,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+comment on table public.pack_options is 'Dropdown values for pack selection.';
+comment on table public.game_options is 'Dropdown values for game selection.';
+
+-- Seed examples (safe to rerun)
+insert into public.pack_options (name) values ('MPass'), ('Bpass')
+on conflict (name) do nothing;
+
+insert into public.game_options (name) values ('Wuwa'), ('R1999')
+on conflict (name) do nothing;
+
 -- 3) Row Level Security
 alter table public.cash_flows enable row level security;
+alter table public.pack_options enable row level security;
+alter table public.game_options enable row level security;
 
 -- Replace this with your actual Supabase auth user id (UUID) that should own edits.
 -- Example: select auth.uid() after logging in; then paste that UUID below.
@@ -53,11 +80,51 @@ begin
       using (auth.uid() = owner)
       with check (auth.uid() = owner);
   end if;
+
+  -- Pack options policies
+  if not exists (
+    select 1 from pg_policies where tablename = 'pack_options' and policyname = 'Pack read for all'
+  ) then
+    create policy "Pack read for all"
+      on public.pack_options
+      for select
+      using (true);
+  end if;
+  if not exists (
+    select 1 from pg_policies where tablename = 'pack_options' and policyname = 'Pack owner manage'
+  ) then
+    create policy "Pack owner manage"
+      on public.pack_options
+      for all
+      using (auth.uid() = owner)
+      with check (auth.uid() = owner);
+  end if;
+
+  -- Game options policies
+  if not exists (
+    select 1 from pg_policies where tablename = 'game_options' and policyname = 'Game read for all'
+  ) then
+    create policy "Game read for all"
+      on public.game_options
+      for select
+      using (true);
+  end if;
+  if not exists (
+    select 1 from pg_policies where tablename = 'game_options' and policyname = 'Game owner manage'
+  ) then
+    create policy "Game owner manage"
+      on public.game_options
+      for all
+      using (auth.uid() = owner)
+      with check (auth.uid() = owner);
+  end if;
 end $$;
 
 -- 4) Grants (safe defaults)
 grant select on public.cash_flows to anon, authenticated;
 grant insert, update, delete on public.cash_flows to authenticated;
+grant select on public.pack_options, public.game_options to anon, authenticated;
+grant insert, update, delete on public.pack_options, public.game_options to authenticated;
 
 -- After RLS, only the owner policy allows writes; others will be blocked despite grants.
 

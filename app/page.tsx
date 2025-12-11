@@ -24,8 +24,6 @@ type FormState = {
   note?: string;
 };
 
-const PACK_OPTIONS = ["MPass", "Bpass"] as const;
-const GAME_OPTIONS = ["Wuwa", "R1999"] as const;
 const DEFAULT_BACKGROUNDS = ["/img/background-1.jpg", "/img/background-2.jpg"];
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -64,8 +62,8 @@ export default function Home() {
   const [topupForm, setTopupForm] = useState<FormState>({
     amount: "",
     date: today,
-    pack: PACK_OPTIONS[0],
-    game: GAME_OPTIONS[0],
+    pack: "",
+    game: "",
     note: "",
   });
 
@@ -76,6 +74,24 @@ export default function Home() {
   const [showAuth, setShowAuth] = useState(false);
   const [backgrounds, setBackgrounds] = useState<string[]>(DEFAULT_BACKGROUNDS);
   const [bgIndex, setBgIndex] = useState(0);
+  const [packOptions, setPackOptions] = useState<string[]>([]);
+  const [gameOptions, setGameOptions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (packOptions.length && !topupForm.pack) {
+      queueMicrotask(() =>
+        setTopupForm((p) => ({ ...p, pack: packOptions[0] }))
+      );
+    }
+  }, [packOptions, topupForm.pack]);
+
+  useEffect(() => {
+    if (gameOptions.length && !topupForm.game) {
+      queueMicrotask(() =>
+        setTopupForm((p) => ({ ...p, game: gameOptions[0] }))
+      );
+    }
+  }, [gameOptions, topupForm.game]);
 
   const summary = useMemo(() => {
     const incoming = flows
@@ -104,12 +120,29 @@ export default function Home() {
     setLoading(false);
   }, []);
 
+  const loadOptions = useCallback(async () => {
+    if (!supabase) return;
+    const [{ data: packs }, { data: games }] = await Promise.all([
+      supabase
+        .from("pack_options")
+        .select("name")
+        .order("name", { ascending: true }),
+      supabase
+        .from("game_options")
+        .select("name")
+        .order("name", { ascending: true }),
+    ]);
+    if (packs?.length) setPackOptions(packs.map((p) => p.name));
+    if (games?.length) setGameOptions(games.map((g) => g.name));
+  }, []);
+
   useEffect(() => {
     if (!supabase) return;
     queueMicrotask(() => {
       void loadData();
+      void loadOptions();
     });
-  }, [loadData]);
+  }, [loadData, loadOptions]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -182,23 +215,6 @@ export default function Home() {
     setAuthLoading(false);
   }
 
-  async function handleSignUp() {
-    if (!supabase) return;
-    setAuthLoading(true);
-    setAuthStatus(null);
-    setError(null);
-    const { error } = await supabase.auth.signUp({
-      email: authEmail,
-      password: authPassword,
-    });
-    if (error) {
-      setError(error.message);
-    } else {
-      setAuthStatus("Check your email to verify your account, then sign in.");
-    }
-    setAuthLoading(false);
-  }
-
   async function handleSignOut() {
     if (!supabase) return;
     setAuthLoading(true);
@@ -218,6 +234,10 @@ export default function Home() {
     }
     if (!user) {
       setError("Please sign in to add records.");
+      return;
+    }
+    if (direction === "topup" && (!form.pack || !form.game)) {
+      setError("Select pack and game for a top-up.");
       return;
     }
     if (!form.amount) {
@@ -249,8 +269,8 @@ export default function Home() {
         setTopupForm({
           amount: "",
           date: today,
-          pack: PACK_OPTIONS[0],
-          game: GAME_OPTIONS[0],
+          pack: packOptions[0] ?? "",
+          game: gameOptions[0] ?? "",
           note: "",
         });
       }
@@ -451,7 +471,8 @@ export default function Home() {
                     }
                     disabled={disableEditing}
                   >
-                    {PACK_OPTIONS.map((opt) => (
+                    <option value="">Select pack</option>
+                    {packOptions.map((opt) => (
                       <option key={opt}>{opt}</option>
                     ))}
                   </select>
@@ -466,7 +487,8 @@ export default function Home() {
                     }
                     disabled={disableEditing}
                   >
-                    {GAME_OPTIONS.map((opt) => (
+                    <option value="">Select game</option>
+                    {gameOptions.map((opt) => (
                       <option key={opt}>{opt}</option>
                     ))}
                   </select>
@@ -616,13 +638,6 @@ export default function Home() {
                     disabled={authLoading}
                   >
                     Sign in
-                  </button>
-                  <button
-                    className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-200"
-                    onClick={handleSignUp}
-                    disabled={authLoading}
-                  >
-                    Sign up
                   </button>
                 </div>
               </div>
