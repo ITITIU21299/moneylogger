@@ -1,0 +1,63 @@
+-- Money Logger schema for Supabase
+-- Run this in the SQL editor or psql inside your Supabase project.
+
+-- 1) Extensions (Supabase usually has these, but run for safety)
+create extension if not exists "pgcrypto";
+
+-- 2) Cash flow table
+create table if not exists public.cash_flows (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  event_date date not null,
+  direction text not null check (direction in ('incoming', 'topup')),
+  amount numeric(12,2) not null check (amount > 0),
+  pack text,
+  game text,
+  note text,
+  created_by uuid default auth.uid()
+);
+
+comment on table public.cash_flows is 'Tracks money received and top-ups you perform.';
+comment on column public.cash_flows.direction is 'incoming = friend sent you money, topup = you spent on their top-up.';
+
+-- Helpful index for sorting/filtering
+create index if not exists cash_flows_event_date_idx on public.cash_flows (event_date desc);
+
+-- 3) Row Level Security
+alter table public.cash_flows enable row level security;
+
+-- Replace this with your actual Supabase auth user id (UUID) that should own edits.
+-- Example: select auth.uid() after logging in; then paste that UUID below.
+-- Only that user can insert/update/delete; everyone can read.
+do $$
+declare
+  owner uuid := 'REPLACE-WITH-YOUR-USER-UUID';
+begin
+  -- Select / read for everyone (anon included)
+  if not exists (
+    select 1 from pg_policies where tablename = 'cash_flows' and policyname = 'Allow read for all'
+  ) then
+    create policy "Allow read for all"
+      on public.cash_flows
+      for select
+      using (true);
+  end if;
+
+  -- Insert / update / delete only by owner
+  if not exists (
+    select 1 from pg_policies where tablename = 'cash_flows' and policyname = 'Owner manage'
+  ) then
+    create policy "Owner manage"
+      on public.cash_flows
+      for all
+      using (auth.uid() = owner)
+      with check (auth.uid() = owner);
+  end if;
+end $$;
+
+-- 4) Grants (safe defaults)
+grant select on public.cash_flows to anon, authenticated;
+grant insert, update, delete on public.cash_flows to authenticated;
+
+-- After RLS, only the owner policy allows writes; others will be blocked despite grants.
+
